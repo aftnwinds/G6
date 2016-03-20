@@ -32,6 +32,8 @@ const char log_level_itoa[][6] = { "DEBUG" , "INFO" , "WARN" , "ERROR" , "FATAL"
 /* 打开日志文件 */
 static int OpenLogFile()
 {
+	CloseLogFile();
+	
 #if ( defined __linux__ ) || ( defined __unix ) || ( defined _AIX )
 	g_file_fd = OPEN( g_log_pathfilename , O_CREAT | O_WRONLY | O_APPEND , S_IRWXU | S_IRWXG | S_IRWXO ) ;
 #elif ( defined _WIN32 )
@@ -79,7 +81,7 @@ void SetLogLevel( int log_level )
 }
 
 /* 输出日志 */
-static int WriteLogBase( int log_level , char *c_filename , long c_fileline , char *format , va_list valist )
+int WriteLogBaseV( int log_level , char *c_filename , long c_fileline , char *format , va_list valist )
 {
 	char		c_filename_copy[ MAXLEN_FILENAME + 1 ] ;
 	char		*p_c_filename = NULL ;
@@ -107,6 +109,10 @@ static int WriteLogBase( int log_level , char *c_filename , long c_fileline , ch
 	log_buflen = 0 ;
 	log_buf_remain_len = sizeof(log_buffer) - 1 ;
 	
+	/*
+	gettimeofday( & g_time_tv , NULL );
+	len = SNPRINTF( log_bufptr , log_buf_remain_len , "%s.%06ld | %-5s | %lu:%lu:%s:%ld | " , g_date_and_time , g_time_tv.tv_usec , log_level_itoa[log_level] , g_pid , g_tid , p_c_filename , c_fileline ) ;
+	*/
 	len = SNPRINTF( log_bufptr , log_buf_remain_len , "%s | %-5s | %lu:%lu:%s:%ld | " , g_date_and_time , log_level_itoa[log_level] , g_pid , g_tid , p_c_filename , c_fileline ) ;
 	OFFSET_BUFPTR( log_buffer , log_bufptr , len , log_buflen , log_buf_remain_len );
 	len = VSNPRINTF( log_bufptr , log_buf_remain_len , format , valist );
@@ -131,6 +137,23 @@ static int WriteLogBase( int log_level , char *c_filename , long c_fileline , ch
 	return 0;
 }
 
+int WriteLogBase( int log_level , char *c_filename , long c_fileline , char *format , ... )
+{
+	va_list		valist ;
+	
+	int		nret = 0 ;
+	
+	va_start( valist , format );
+	nret = WriteLogBaseV( log_level , c_filename , c_fileline , format , valist );
+	va_end( valist );
+	
+	return 0;
+}
+
+#if ( defined __STDC_VERSION__ ) && ( __STDC_VERSION__ >= 199901 )
+
+#else
+
 int WriteLog( int log_level , char *c_filename , long c_fileline , char *format , ... )
 {
 	va_list		valist ;
@@ -139,7 +162,7 @@ int WriteLog( int log_level , char *c_filename , long c_fileline , char *format 
 		return 0;
 	
 	va_start( valist , format );
-	WriteLogBase( log_level , c_filename , c_fileline , format , valist );
+	WriteLogBaseV( log_level , c_filename , c_fileline , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -153,7 +176,7 @@ int FatalLog( char *c_filename , long c_fileline , char *format , ... )
 		return 0;
 	
 	va_start( valist , format );
-	WriteLogBase( LOGLEVEL_FATAL , c_filename , c_fileline , format , valist );
+	WriteLogBaseV( LOGLEVEL_FATAL , c_filename , c_fileline , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -167,7 +190,7 @@ int ErrorLog( char *c_filename , long c_fileline , char *format , ... )
 		return 0;
 	
 	va_start( valist , format );
-	WriteLogBase( LOGLEVEL_ERROR , c_filename , c_fileline , format , valist );
+	WriteLogBaseV( LOGLEVEL_ERROR , c_filename , c_fileline , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -181,7 +204,7 @@ int WarnLog( char *c_filename , long c_fileline , char *format , ... )
 		return 0;
 	
 	va_start( valist , format );
-	WriteLogBase( LOGLEVEL_WARN , c_filename , c_fileline , format , valist );
+	WriteLogBaseV( LOGLEVEL_WARN , c_filename , c_fileline , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -195,7 +218,7 @@ int InfoLog( char *c_filename , long c_fileline , char *format , ... )
 		return 0;
 	
 	va_start( valist , format );
-	WriteLogBase( LOGLEVEL_INFO , c_filename , c_fileline , format , valist );
+	WriteLogBaseV( LOGLEVEL_INFO , c_filename , c_fileline , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -209,13 +232,15 @@ int DebugLog( char *c_filename , long c_fileline , char *format , ... )
 		return 0;
 	
 	va_start( valist , format );
-	WriteLogBase( LOGLEVEL_DEBUG , c_filename , c_fileline , format , valist );
+	WriteLogBaseV( LOGLEVEL_DEBUG , c_filename , c_fileline , format , valist );
 	va_end( valist );
 	
 	return 0;
 }
 
-static int WriteHexLogBase( int log_level , char *c_filename , long c_fileline , char *buf , long buflen , char *format , va_list valist )
+#endif
+
+int WriteHexLogBaseV( int log_level , char *c_filename , long c_fileline , char *buf , long buflen , char *format , va_list valist )
 {
 	char		hexlog_buffer[ 4096 * 10 + 1 ] ;
 	char		*hexlog_bufptr = NULL ;
@@ -235,7 +260,7 @@ static int WriteHexLogBase( int log_level , char *c_filename , long c_fileline ,
 	/* 输出行日志 */
 	if( format )
 	{
-		WriteLogBase( log_level , c_filename , c_fileline , format , valist );
+		WriteLogBaseV( log_level , c_filename , c_fileline , format , valist );
 	}
 	
 	/* 填充十六进制块日志 */
@@ -315,6 +340,23 @@ static int WriteHexLogBase( int log_level , char *c_filename , long c_fileline ,
 	return 0;
 }
 
+int WriteHexLogBase( int log_level , char *c_filename , long c_fileline , char *buf , long buflen , char *format , ... )
+{
+	va_list		valist ;
+	
+	int		nret = 0 ;
+	
+	va_start( valist , format );
+	nret = WriteHexLogBaseV( log_level , c_filename , c_fileline , buf , buflen , format , valist ) ;
+	va_end( valist );
+	
+	return 0;
+}
+
+#if ( defined __STDC_VERSION__ ) && ( __STDC_VERSION__ >= 199901 )
+
+#else
+
 int WriteHexLog( int log_level , char *c_filename , long c_fileline , char *buf , long buflen , char *format , ... )
 {
 	va_list		valist ;
@@ -323,7 +365,7 @@ int WriteHexLog( int log_level , char *c_filename , long c_fileline , char *buf 
 		return 0;
 	
 	va_start( valist , format );
-	WriteHexLogBase( log_level , c_filename , c_fileline , buf , buflen , format , valist );
+	WriteHexLogBaseV( log_level , c_filename , c_fileline , buf , buflen , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -337,7 +379,7 @@ int FatalHexLog( char *c_filename , long c_fileline , char *buf , long buflen , 
 		return 0;
 	
 	va_start( valist , format );
-	WriteHexLogBase( LOGLEVEL_FATAL , c_filename , c_fileline , buf , buflen , format , valist );
+	WriteHexLogBaseV( LOGLEVEL_FATAL , c_filename , c_fileline , buf , buflen , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -351,7 +393,7 @@ int ErrorHexLog( char *c_filename , long c_fileline , char *buf , long buflen , 
 		return 0;
 	
 	va_start( valist , format );
-	WriteHexLogBase( LOGLEVEL_ERROR , c_filename , c_fileline , buf , buflen , format , valist );
+	WriteHexLogBaseV( LOGLEVEL_ERROR , c_filename , c_fileline , buf , buflen , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -365,7 +407,7 @@ int WarnHexLog( char *c_filename , long c_fileline , char *buf , long buflen , c
 		return 0;
 	
 	va_start( valist , format );
-	WriteHexLogBase( LOGLEVEL_WARN , c_filename , c_fileline , buf , buflen , format , valist );
+	WriteHexLogBaseV( LOGLEVEL_WARN , c_filename , c_fileline , buf , buflen , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -379,7 +421,7 @@ int InfoHexLog( char *c_filename , long c_fileline , char *buf , long buflen , c
 		return 0;
 	
 	va_start( valist , format );
-	WriteHexLogBase( LOGLEVEL_INFO , c_filename , c_fileline , buf , buflen , format , valist );
+	WriteHexLogBaseV( LOGLEVEL_INFO , c_filename , c_fileline , buf , buflen , format , valist );
 	va_end( valist );
 	
 	return 0;
@@ -393,9 +435,10 @@ int DebugHexLog( char *c_filename , long c_fileline , char *buf , long buflen , 
 		return 0;
 	
 	va_start( valist , format );
-	WriteHexLogBase( LOGLEVEL_DEBUG , c_filename , c_fileline , buf , buflen , format , valist );
+	WriteHexLogBaseV( LOGLEVEL_DEBUG , c_filename , c_fileline , buf , buflen , format , valist );
 	va_end( valist );
 	
 	return 0;
 }
 
+#endif

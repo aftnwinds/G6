@@ -21,78 +21,7 @@ unsigned long CalcHash( char *str )
 	return hashval;
 }
 
-/* 设置sock重用选项 */
-void SetReuseAddr( int sock )
-{
-	int	on = 1 ;
-	
-	setsockopt( sock , SOL_SOCKET , SO_REUSEADDR , (void *) & on, sizeof(on) );
-	
-	return;
-}
-
-/* 设置sock非堵塞选项 */
-void SetNonBlocking( int sock )
-{
-#if ( defined __linux ) || ( defined __unix )
-	int	opts;
-	
-	opts = fcntl( sock , F_GETFL ) ;
-	opts = opts | O_NONBLOCK;
-	fcntl( sock , F_SETFL , opts );
-#elif ( defined _WIN32 )
-	u_long	mode = 1 ;
-	ioctlsocket( sock , FIONBIO , & mode );
-#endif
-	
-	return;
-}
-
-/* 关闭算法 */
-void SetNagleClosed( int sock )
-{
-	int	on = 1 ;
-	
-	setsockopt( sock , IPPROTO_TCP , TCP_NODELAY , (void*) & on , sizeof(int) );
-	
-	return;
-}
-
-/* 设置exec自动关闭选项 */
-void SetCloseExec( int sock )
-{
-	int	val ;
-	
-	val = fcntl( sock , F_GETFD ) ;
-	val |= FD_CLOEXEC ;
-	fcntl( sock , F_SETFD , val );
-	
-	return;
-}
-
-void SetCloseExec2( int sock , int sock2 )
-{
-	SetCloseExec( sock );
-	SetCloseExec( sock2 );
-	return;
-}
-
-void SetCloseExec3( int sock , int sock2 , int sock3 )
-{
-	SetCloseExec( sock );
-	SetCloseExec( sock2 );
-	SetCloseExec( sock3 );
-	return;
-}
-
-void SetCloseExec4( int sock , int sock2 , int sock3 , int sock4 )
-{
-	SetCloseExec( sock );
-	SetCloseExec( sock2 );
-	SetCloseExec( sock3 );
-	SetCloseExec( sock4 );
-	return;
-}
+#if 0
 
 /* 用IP和PORT设置sockaddr结构 */
 void SetNetAddress( struct NetAddress *p_netaddr )
@@ -111,6 +40,8 @@ void GetNetAddress( struct NetAddress *p_netaddr )
 	p_netaddr->port.port_int = (int)ntohs( p_netaddr->sockaddr.sin_port ) ;
 	return;
 }
+
+#endif
 
 /* 转换为守护进程 */
 int BindDaemonServer( char *pcServerName , int (* ServerMain)( void *pv ) , void *pv , int (* ControlMain)(long lControlStatus) )
@@ -221,5 +152,53 @@ int IsMatchString(char *pcMatchString, char *pcObjectString, char cMatchMuchChar
 	} 
 
 	return 0;
+}
+
+/* 绑定CPU亲缘性 */
+int BindCpuAffinity( int processor_no )
+{
+	/*
+	cpu_set_t	cpu_mask ;
+	*/
+	int		nret = 0 ;
+	/*
+	CPU_ZERO( & cpu_mask );
+	CPU_SET( processor_no , & cpu_mask );
+	nret = sched_setaffinity( 0 , sizeof(cpu_mask) , & cpu_mask ) ;
+	*/
+	return nret;
+}
+
+void UpdateTimeNow( struct timeval *p_time_tv , char *p_date_and_time )
+{
+	struct tm		stime ;
+	
+	p_time_tv->tv_sec = time( NULL ) ;
+	
+#if ( defined __linux__ ) || ( defined __unix ) || ( defined _AIX )
+	/*
+	gettimeofday( & g_time_tv , NULL );
+	*/
+	localtime_r( &(p_time_tv->tv_sec) , & stime );
+#elif ( defined _WIN32 )
+	{
+	SYSTEMTIME	stNow ;
+	GetLocalTime( & stNow );
+	time( & (p_time_tv->tv_sec) );
+	/*
+	g_time_tv.tv_usec = stNow.wMilliseconds * 1000 ;
+	*/
+	stime.tm_year = stNow.wYear - 1900 ;
+	stime.tm_mon = stNow.wMonth - 1 ;
+	stime.tm_mday = stNow.wDay ;
+	stime.tm_hour = stNow.wHour ;
+	stime.tm_min = stNow.wMinute ;
+	stime.tm_sec = stNow.wSecond ;
+	}
+#endif
+	
+	strftime( p_date_and_time , sizeof(g_date_and_time) , "%Y-%m-%d %H:%M:%S" , & stime );
+	
+	return;
 }
 

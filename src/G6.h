@@ -14,21 +14,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
 #include <stdarg.h>
 #include <limits.h>
-#include <signal.h>
 #include <sys/wait.h>
+#include <signal.h>
+#include <sched.h>
 #include <pthread.h>
 #define _VSNPRINTF			vsnprintf
 #define _SNPRINTF			snprintf
@@ -199,16 +200,6 @@ struct ForwardNetAddress
 } ;
 
 /* 服务端信息结构 */
-#define SERVER_CONNECTION_COUNT_INCREASE(_penv_,_server_addr_,_d_) \
-	pthread_mutex_lock( & ((_penv_)->server_connection_count_mutex) ); \
-	(_server_addr_).ip_connection_stat.connection_count+=(_d_); \
-	pthread_mutex_unlock( & ((_penv_)->server_connection_count_mutex) );
-
-#define SERVER_CONNECTION_COUNT_DECREASE(_penv_,_server_addr_,_d_) \
-	pthread_mutex_lock( & ((_penv_)->server_connection_count_mutex) ); \
-	(_server_addr_).ip_connection_stat.connection_count-=(_d_); \
-	pthread_mutex_unlock( & ((_penv_)->server_connection_count_mutex) );
-
 struct ServerNetAddress
 {
 	struct NetAddress	netaddr ; /* 网络地址结构 */
@@ -279,29 +270,33 @@ struct CommandParameter
 	char				*config_pathfilename ; /* -f ... */
 	unsigned int			forward_thread_size ; /* -t ... */
 	unsigned int			forward_session_size ; /* -s ... */
-	int				log_level ; /* --log-level (DEBUG|INFO|WARN|ERROR|FATAL)*/
+	unsigned int			log_level ; /* --log-level (DEBUG|INFO|WARN|ERROR|FATAL)*/
 	char				log_pathfilename[ MAXLEN_FILENAME + 1 ] ; /* --log-filename (logfilename) */
-	int				no_daemon_flag ; /* --no-daemon */
-	int				close_log_flag ; /* --close-log */
+	unsigned int			no_daemon_flag ; /* --no-daemon */
+	unsigned int			close_log_flag ; /* --close-log */
 } ;
 
 /* 服务器环境结构 */
 extern struct ServerEnv			*g_penv ;
-extern int				g_exit_flag ;
+extern signed char			g_exit_flag ;
 
 struct PipeFds
 {
 	int				fds[ 2 ] ;
 } ;
 
-#define INIT_TIME \
-	UpdateTimeNow( & g_time_tv , g_date_and_time ); \
-
 #define UPDATE_TIME \
-	pthread_mutex_lock( & (penv->time_cache_mutex) ); \
-	g_time_tv.tv_sec = penv->time_tv.tv_sec ; \
-	memcpy( g_date_and_time , penv->date_and_time , sizeof(penv->date_and_time) ); \
-	pthread_mutex_unlock( & (penv->time_cache_mutex) );
+	{ \
+		UpdateTimeNow( & g_time_tv , g_date_and_time ); \
+	}
+
+#define UPDATE_TIME_FROM_CACHE \
+	{ \
+		pthread_mutex_lock( & (penv->time_cache_mutex) ); \
+		g_time_tv.tv_sec = penv->time_tv.tv_sec ; \
+		memcpy( g_date_and_time , penv->date_and_time , sizeof(penv->date_and_time) ); \
+		pthread_mutex_unlock( & (penv->time_cache_mutex) ); \
+	}
 
 struct ServerEnv
 {
@@ -350,17 +345,79 @@ struct ServerEnv
 
 int Rand( int min, int max );
 unsigned long CalcHash( char *str );
-void SetReuseAddr( int sock );
-void SetNonBlocking( int sock );
-void SetNagleClosed( int sock );
-void SetCloseExec( int sock );
-void SetCloseExec2( int sock , int sock2 );
-void SetCloseExec3( int sock , int sock2 , int sock3 );
-void SetCloseExec4( int sock , int sock2 , int sock3 , int sock4 );
 void SetNetAddress( struct NetAddress *p_netaddr );
 void GetNetAddress( struct NetAddress *p_netaddr );
 int BindDaemonServer( char *pcServerName , int (* ServerMain)( void *pv ) , void *pv , int (* ControlMain)(long lControlStatus) );
 int IsMatchString(char *pcMatchString, char *pcObjectString, char cMatchMuchCharacters, char cMatchOneCharacters);
+int BindCpuAffinity( int processor_no );
+void UpdateTimeNow( struct timeval *p_time_tv , char *p_date_and_time );
+
+#define SetReuseAddr(_sock_) \
+	{ \
+		int	on = 1 ; \
+		setsockopt( _sock_ , SOL_SOCKET , SO_REUSEADDR , (void *) & on, sizeof(on) ); \
+	}
+
+#if ( defined __linux ) || ( defined __unix )
+#define SetNonBlocking(_sock_) \
+	{ \
+		int	opts; \
+		opts = fcntl( _sock_ , F_GETFL ) ; \
+		opts = opts | O_NONBLOCK; \
+		fcntl( _sock_ , F_SETFL , opts ); \
+	}
+#elif ( defined _WIN32 )
+#define SetNonBlocking(_sock_) \
+	{ \
+		u_long	mode = 1 ; \
+		ioctlsocket( _sock_ , FIONBIO , & mode ); \
+	}
+#endif
+
+#define SetNagleClosed(_sock_) \
+	{ \
+		int	on = 1 ; \
+		setsockopt( _sock_ , IPPROTO_TCP , TCP_NODELAY , (void*) & on , sizeof(int) ); \
+	}
+
+#define SetCloseExec(_sock_) \
+	{ \
+		int	val ; \
+		val = fcntl( _sock_ , F_GETFD ) ; \
+		val |= FD_CLOEXEC ; \
+		fcntl( _sock_ , F_SETFD , val ); \
+	}
+
+#define SetCloseExec2(_sock_,_sock2_) \
+	{ \
+		SetCloseExec( _sock_ ); \
+		SetCloseExec( _sock2_ ); \
+	}
+
+#define SetCloseExec3(_sock_,_sock2_,_sock3_) \
+	{ \
+		SetCloseExec( _sock_ ); \
+		SetCloseExec( _sock2_ ); \
+		SetCloseExec( _sock3_ ); \
+	}
+
+#define SetCloseExec4(_sock_,_sock2_,_sock3_,_sock4_) \
+	{ \
+		SetCloseExec( _sock_ ); \
+		SetCloseExec( _sock2_ ); \
+		SetCloseExec( _sock3_ ); \
+		SetCloseExec( _sock4_ ); \
+	}
+
+#define SetNetAddress(_p_netaddr_) \
+	memset( & ((_p_netaddr_)->sockaddr) , 0x00 , sizeof(struct sockaddr_in) ); \
+	(_p_netaddr_)->sockaddr.sin_family = AF_INET ; \
+	(_p_netaddr_)->sockaddr.sin_addr.s_addr = inet_addr((_p_netaddr_)->ip) ; \
+	(_p_netaddr_)->sockaddr.sin_port = htons( (unsigned short)((_p_netaddr_)->port.port_int) );
+
+#define GetNetAddress(_p_netaddr_) \
+	strcpy( (_p_netaddr_)->ip , inet_ntoa((_p_netaddr_)->sockaddr.sin_addr) ); \
+	(_p_netaddr_)->port.port_int = (int)ntohs( (_p_netaddr_)->sockaddr.sin_port ) ;
 
 /********* Envirment *********/
 
@@ -414,12 +471,39 @@ void *_AcceptThread( void *pv );
 
 /********* ForwardThread *********/
 
+#define DISCONNECT_PAIR	\
+	epoll_ctl( forward_epoll_fd , EPOLL_CTL_DEL , p_forward_session->sock , NULL ); \
+	epoll_ctl( forward_epoll_fd , EPOLL_CTL_DEL , p_reverse_forward_session->sock , NULL ); \
+	RemoveTimeoutTreeNode2( penv , p_forward_session , p_reverse_forward_session ); \
+	if( p_forward_session->type == FORWARD_SESSION_TYPE_SERVER ) \
+	{ \
+		nret = RemoveIpConnectionStat( penv , & (p_forward_session->p_forward_rule->client_addr_array[p_forward_session->client_index].ip_connection_stat) , p_forward_session->netaddr.sockaddr.sin_addr.s_addr ) ; \
+		if( nret ) \
+			ErrorLog( __FILE__ , __LINE__ , "RemoveIpConnectionStat failed[%d] , SERVER.1" , nret ); \
+		nret = RemoveIpConnectionStat( penv , & (p_reverse_forward_session->p_forward_rule->server_addr_array[p_reverse_forward_session->server_index].ip_connection_stat) , p_reverse_forward_session->netaddr.sockaddr.sin_addr.s_addr ) ; \
+		if( nret ) \
+			ErrorLog( __FILE__ , __LINE__ , "RemoveIpConnectionStat failed[%d] , SERVER.2" , nret ); \
+	} \
+	else if( p_forward_session->type == FORWARD_SESSION_TYPE_CLIENT ) \
+	{ \
+		nret = RemoveIpConnectionStat( penv , & (p_forward_session->p_forward_rule->server_addr_array[p_forward_session->server_index].ip_connection_stat) , p_forward_session->netaddr.sockaddr.sin_addr.s_addr ) ; \
+		if( nret ) \
+			ErrorLog( __FILE__ , __LINE__ , "RemoveIpConnectionStat failed[%d] , CLIENT.1" , nret ); \
+		nret = RemoveIpConnectionStat( penv , & (p_reverse_forward_session->p_forward_rule->client_addr_array[p_reverse_forward_session->client_index].ip_connection_stat) , p_reverse_forward_session->netaddr.sockaddr.sin_addr.s_addr ) ; \
+		if( nret ) \
+			ErrorLog( __FILE__ , __LINE__ , "RemoveIpConnectionStat failed[%d] , CLIENT.2" , nret ); \
+	} \
+	DebugLog( __FILE__ , __LINE__ , "close #%d# #%d#" , p_forward_session->sock , p_reverse_forward_session->sock ); \
+	_CLOSESOCKET2( p_forward_session->sock , p_reverse_forward_session->sock ); \
+	/* IgnoreReverseSessionEvents( p_forward_session , events , event_index , event_count ); */ \
+	SetForwardSessionUnused2( penv , p_forward_session , p_reverse_forward_session );
+
+int OnForwardInput( struct ServerEnv *penv , struct ForwardSession *p_forward_session , int forward_epoll_fd , struct epoll_event *p_events , int event_index , int event_count , unsigned char after_accept_flag );
 void *ForwardThread( unsigned long forward_thread_index );
 void *_ForwardThread( void *pv );
 
 /********* TimeThread *********/
 
-void UpdateTimeNow( struct timeval *p_time_tv , char *p_date_and_time );
 void *TimeThread();
 void *_TimeThread( void *pv );
 

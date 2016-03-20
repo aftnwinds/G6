@@ -362,7 +362,6 @@ int AddListeners( struct ServerEnv *penv )
 					{
 						memcpy( & (p_forward_addr->netaddr.sockaddr) , & (p_old_forward_addr->netaddr.sockaddr) , sizeof(struct sockaddr_in) );
 						p_forward_addr->sock = p_old_forward_addr->sock ;
-ErrorLog( __FILE__ , __LINE__ , "p_forward_addr->timeout[%ld]" , p_forward_addr->timeout );
 						memset( p_old_forward_addr , 0x00 , sizeof(struct ForwardNetAddress) );
 						break;
 					}
@@ -558,7 +557,7 @@ static int _AddTimeoutTreeNode( struct ServerEnv *penv , struct ForwardSession *
 	pp_new_node = & (penv->timeout_rbtree.rb_node) ;
         while( *pp_new_node )
         {
-                p = container_of( *pp_new_node , struct ForwardSession , timeout_rbnode );
+                p = container_of( *pp_new_node , struct ForwardSession , timeout_rbnode ) ;
 		
                 p_parent = (*pp_new_node) ;
                 if( p_forward_session->timeout_timestamp < p->timeout_timestamp )
@@ -724,6 +723,10 @@ int InitIpConnectionStat( struct IpConnectionStat *p_ip_connection_stat )
 		
 		p_ip_connection_stat->ip_count = 0 ;
 		p_ip_connection_stat->connection_count = 0 ;
+	}
+	else
+	{
+		memset( p_ip_connection_stat , 0x00 , sizeof(struct IpConnectionStat) );
 	}
 	
 	return 0;
