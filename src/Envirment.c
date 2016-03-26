@@ -18,21 +18,13 @@ int InitEnvirment( struct ServerEnv *penv )
 	memset( penv->forward_thread_tid_array , 0x00 , sizeof(pthread_t) * penv->cmd_para.forward_thread_size );
 	
 	/* 创建父子进程命令管道 */
-	nret = pipe( penv->accept_request_pipe.fds ) ;
+	nret = pipe( penv->accept_command_pipe.fds ) ;
 	if( nret == -1 )
 	{
 		ErrorLog( __FILE__ , __LINE__ , "pipe failed , errno[%d]" , errno );
 		return -1;
 	}
-	SetCloseExec2( penv->accept_request_pipe.fds[0] , penv->accept_request_pipe.fds[1] );
-	
-	nret = pipe( penv->accept_response_pipe.fds ) ;
-	if( nret == -1 )
-	{
-		ErrorLog( __FILE__ , __LINE__ , "pipe failed , errno[%d]" , errno );
-		return -1;
-	}
-	SetCloseExec2( penv->accept_response_pipe.fds[0] , penv->accept_response_pipe.fds[1] );
+	SetCloseExec2( penv->accept_command_pipe.fds[0] , penv->accept_command_pipe.fds[1] );
 	
 	/* 创建侦听端口epoll池 */
 	penv->accept_epoll_fd = epoll_create( 1024 );
@@ -47,24 +39,16 @@ int InitEnvirment( struct ServerEnv *penv )
 	memset( & event , 0x00 , sizeof(event) );
 	event.data.ptr = NULL ;
 	event.events = EPOLLIN | EPOLLERR ;
-	epoll_ctl( penv->accept_epoll_fd , EPOLL_CTL_ADD , penv->accept_request_pipe.fds[0] , & event );
+	epoll_ctl( penv->accept_epoll_fd , EPOLL_CTL_ADD , penv->accept_command_pipe.fds[0] , & event );
 	
 	/* 申请父子线程命令管道数组 */
-	penv->forward_request_pipe = (struct PipeFds *)malloc( sizeof(struct PipeFds) * penv->cmd_para.forward_thread_size ) ;
-	if( penv->forward_request_pipe == NULL )
+	penv->forward_command_pipe = (struct PipeFds *)malloc( sizeof(struct PipeFds) * penv->cmd_para.forward_thread_size ) ;
+	if( penv->forward_command_pipe == NULL )
 	{
 		ErrorLog( __FILE__ , __LINE__ , "malloc failed , errno[%d]" , errno );
 		return -1;
 	}
-	memset( penv->forward_request_pipe , 0x00 , sizeof(struct PipeFds) * penv->cmd_para.forward_thread_size );
-	
-	penv->forward_response_pipe = (struct PipeFds *)malloc( sizeof(struct PipeFds) * penv->cmd_para.forward_thread_size ) ;
-	if( penv->forward_response_pipe == NULL )
-	{
-		ErrorLog( __FILE__ , __LINE__ , "malloc failed , errno[%d]" , errno );
-		return -1;
-	}
-	memset( penv->forward_response_pipe , 0x00 , sizeof(struct PipeFds) * penv->cmd_para.forward_thread_size );
+	memset( penv->forward_command_pipe , 0x00 , sizeof(struct PipeFds) * penv->cmd_para.forward_thread_size );
 	
 	penv->forward_epoll_fd_array = (int *)malloc( sizeof(int) * penv->cmd_para.forward_thread_size ) ;
 	if( penv->forward_epoll_fd_array == NULL )
@@ -77,21 +61,13 @@ int InitEnvirment( struct ServerEnv *penv )
 	for( forward_thread_index = 0 ; forward_thread_index < penv->cmd_para.forward_thread_size ; forward_thread_index++ )
 	{
 		/* 创建父子线程命令管道 */
-		nret = pipe( penv->forward_request_pipe[forward_thread_index].fds ) ;
+		nret = pipe( penv->forward_command_pipe[forward_thread_index].fds ) ;
 		if( nret == -1 )
 		{
 			ErrorLog( __FILE__ , __LINE__ , "pipe failed , errno[%d]" , errno );
 			return -1;
 		}
-		SetCloseExec2( penv->forward_request_pipe[forward_thread_index].fds[0] , penv->forward_request_pipe[forward_thread_index].fds[1] );
-		
-		nret = pipe( penv->forward_response_pipe[forward_thread_index].fds ) ;
-		if( nret == -1 )
-		{
-			ErrorLog( __FILE__ , __LINE__ , "pipe failed , errno[%d]" , errno );
-			return -1;
-		}
-		SetCloseExec2( penv->forward_response_pipe[forward_thread_index].fds[0] , penv->forward_response_pipe[forward_thread_index].fds[1] );
+		SetCloseExec2( penv->forward_command_pipe[forward_thread_index].fds[0] , penv->forward_command_pipe[forward_thread_index].fds[1] );
 		
 		/* 创建数据收发epoll池 */
 		penv->forward_epoll_fd_array[forward_thread_index] = epoll_create( 1024 );
@@ -106,7 +82,7 @@ int InitEnvirment( struct ServerEnv *penv )
 		memset( & event , 0x00 , sizeof(event) );
 		event.data.ptr = NULL ;
 		event.events = EPOLLIN | EPOLLERR ;
-		epoll_ctl( penv->forward_epoll_fd_array[forward_thread_index] , EPOLL_CTL_ADD , penv->forward_request_pipe[forward_thread_index].fds[0] , & event );
+		epoll_ctl( penv->forward_epoll_fd_array[forward_thread_index] , EPOLL_CTL_ADD , penv->forward_command_pipe[forward_thread_index].fds[0] , & event );
 	}
 	
 	/* 申请通讯收发会话数组 */
@@ -122,9 +98,6 @@ int InitEnvirment( struct ServerEnv *penv )
 	penv->timeout_rbtree = RB_ROOT ;
 	
 	/* 创建线程互斥量 */
-	pthread_mutex_init( & (penv->ip_connection_stat_mutex) , NULL );
-	pthread_mutex_init( & (penv->forward_session_count_mutex) , NULL );
-	pthread_mutex_init( & (penv->server_connection_count_mutex) , NULL );
 	pthread_mutex_init( & (penv->timeout_rbtree_mutex) , NULL );
 	pthread_mutex_init( & (penv->time_cache_mutex) , NULL );
 	
@@ -144,10 +117,8 @@ void CleanEnvirment( struct ServerEnv *penv )
 		penv->old_forward_addr_array = NULL ;
 	}
 	
-	close( penv->accept_request_pipe.fds[0] );
-	close( penv->accept_request_pipe.fds[1] );
-	close( penv->accept_response_pipe.fds[0] );
-	close( penv->accept_response_pipe.fds[1] );
+	close( penv->accept_command_pipe.fds[0] );
+	close( penv->accept_command_pipe.fds[1] );
 	
 	close( penv->accept_epoll_fd );
 	free( penv->forward_thread_tid_array );
@@ -165,19 +136,13 @@ void CleanEnvirment( struct ServerEnv *penv )
 	
 	for( forward_thread_index = 0 ; forward_thread_index < penv->cmd_para.forward_thread_size ; forward_thread_index++ )
 	{
-		close( penv->forward_request_pipe[forward_thread_index].fds[0] );
-		close( penv->forward_request_pipe[forward_thread_index].fds[1] );
-		close( penv->forward_response_pipe[forward_thread_index].fds[0] );
-		close( penv->forward_response_pipe[forward_thread_index].fds[1] );
+		close( penv->forward_command_pipe[forward_thread_index].fds[0] );
+		close( penv->forward_command_pipe[forward_thread_index].fds[1] );
 		close( penv->forward_epoll_fd_array[forward_thread_index] );
 	}
-	free( penv->forward_request_pipe );
-	free( penv->forward_response_pipe );
+	free( penv->forward_command_pipe );
 	free( penv->forward_epoll_fd_array );
 	
-	pthread_mutex_destroy( & (penv->ip_connection_stat_mutex) );
-	pthread_mutex_destroy( & (penv->forward_session_count_mutex) );
-	pthread_mutex_destroy( & (penv->server_connection_count_mutex) );
 	pthread_mutex_destroy( & (penv->timeout_rbtree_mutex) );
 	pthread_mutex_destroy( & (penv->time_cache_mutex) );
 	
@@ -445,8 +410,6 @@ struct ForwardSession *GetForwardSessionUnused( struct ServerEnv *penv )
 	unsigned int		n ;
 	struct ForwardSession	*p_forward_session = penv->forward_session_array + penv->forward_session_use_offsetpos ;
 	
-	pthread_mutex_lock( & (penv->forward_session_count_mutex) );
-	
 	for( n = 0 ; n < penv->cmd_para.forward_session_size ; n++ )
 	{
 		if( p_forward_session->status == FORWARD_SESSION_STATUS_UNUSED )
@@ -459,9 +422,7 @@ struct ForwardSession *GetForwardSessionUnused( struct ServerEnv *penv )
 				penv->forward_session_use_offsetpos = 0 ;
 			}
 			
-			penv->forward_session_count++;
-			
-			pthread_mutex_unlock( & (penv->forward_session_count_mutex) );
+			__sync_fetch_and_add(&(penv->forward_session_count),1);
 			
 			return p_forward_session;
 		}
@@ -475,31 +436,23 @@ struct ForwardSession *GetForwardSessionUnused( struct ServerEnv *penv )
 		}
 	}
 	
-	pthread_mutex_unlock( & (penv->forward_session_count_mutex) );
-	
 	return NULL;
 }
 
 void SetForwardSessionUnused( struct ServerEnv *penv , struct ForwardSession *p_forward_session )
 {
-	pthread_mutex_lock( & (penv->forward_session_count_mutex) );
-	
 	if( p_forward_session->status != FORWARD_SESSION_STATUS_UNUSED )
 	{
 		p_forward_session->status = FORWARD_SESSION_STATUS_UNUSED ;
 	}
 	
-	penv->forward_session_count--;
-	
-	pthread_mutex_unlock( & (penv->forward_session_count_mutex) );
+	__sync_fetch_and_sub(&(penv->forward_session_count),1);
 	
 	return;
 }
 
 void SetForwardSessionUnused2( struct ServerEnv *penv , struct ForwardSession *p_forward_session , struct ForwardSession *p_forward_session2 )
 {
-	pthread_mutex_lock( & (penv->forward_session_count_mutex) );
-	
 	if( p_forward_session->status != FORWARD_SESSION_STATUS_UNUSED )
 	{
 		p_forward_session->status = FORWARD_SESSION_STATUS_UNUSED ;
@@ -510,9 +463,7 @@ void SetForwardSessionUnused2( struct ServerEnv *penv , struct ForwardSession *p
 		p_forward_session2->status = FORWARD_SESSION_STATUS_UNUSED ;
 	}
 	
-	penv->forward_session_count -= 2 ;
-	
-	pthread_mutex_unlock( & (penv->forward_session_count_mutex) );
+	__sync_fetch_and_sub(&(penv->forward_session_count),2);
 	
 	return;
 }
@@ -772,10 +723,10 @@ static int _AddIpConnectionStat( struct ServerEnv *penv , struct IpConnectionSta
 			
 			p_ip_connection->used_flag = 1 ;
 			p_ip_connection->ip_int = ip_int ;
-			p_ip_connection->connection_count += connection_count ;
+			__sync_fetch_and_add( &(p_ip_connection->connection_count) , connection_count );
 			
-			p_ip_connection_stat->ip_count++;
-			p_ip_connection_stat->connection_count += connection_count ;
+			__sync_fetch_and_add( &(p_ip_connection_stat->ip_count) , 1 );
+			__sync_fetch_and_add( &(p_ip_connection_stat->connection_count) , connection_count );
 			
 			return 0;
 		}
@@ -787,9 +738,9 @@ static int _AddIpConnectionStat( struct ServerEnv *penv , struct IpConnectionSta
 				return -1;
 			}
 			
-			p_ip_connection->connection_count += connection_count ;
+			__sync_fetch_and_add( &(p_ip_connection->connection_count) , connection_count );
 			
-			p_ip_connection_stat->connection_count += connection_count ;
+			__sync_fetch_and_add( &(p_ip_connection_stat->connection_count) , connection_count );
 			
 			return 0;
 		}
@@ -811,18 +762,14 @@ int AddIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_ip_
 {
 	int			nret = 0 ;
 	
-	pthread_mutex_lock( & (penv->ip_connection_stat_mutex) );
-	
 	if( p_ip_connection_stat->ip_connection_stat_size == 0 )
 	{
-		pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 		return 0;
 	}
 	
 	if( p_ip_connection_stat->max_connections > 0 && p_ip_connection_stat->connection_count+1 > p_ip_connection_stat->max_connections )
 	{
 		ErrorLog( __FILE__ , __LINE__ , "too many connections" );
-		pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 		return -1;
 	}
 	
@@ -843,7 +790,6 @@ int AddIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_ip_
 		if( new_ip_connection_stat.ip_connection_array == NULL )
 		{
 			ErrorLog( __FILE__ , __LINE__ , "malloc failed , errno[%d]" , errno );
-			pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 			return -1;
 		}
 		memset( new_ip_connection_stat.ip_connection_array , 0x00 , sizeof(struct IpConnection) * new_ip_connection_stat.ip_connection_stat_size );
@@ -856,7 +802,6 @@ int AddIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_ip_
 				if( nret )
 				{
 					ErrorLog( __FILE__ , __LINE__ , "AddIpConnectionStat failed[%d]" , nret );
-					pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 					return -1;
 				}
 			}
@@ -868,8 +813,6 @@ int AddIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_ip_
 	
 	nret = _AddIpConnectionStat( penv , p_ip_connection_stat , ip_int , 1 ) ;
 	
-	pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
-	
 	return nret;
 }
 
@@ -879,11 +822,8 @@ int RemoveIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_
 	unsigned int		ip_connection_index ;
 	struct IpConnection	*p_ip_connection = NULL ;
 	
-	pthread_mutex_lock( & (penv->ip_connection_stat_mutex) );
-	
 	if( p_ip_connection_stat->ip_connection_stat_size == 0 )
 	{
-		pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 		return 0;
 	}
 	
@@ -893,18 +833,17 @@ int RemoveIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_
 	{
 		if( p_ip_connection->used_flag == 1 && p_ip_connection->ip_int == ip_int )
 		{
-			p_ip_connection->connection_count--;
+			__sync_fetch_and_sub( &(p_ip_connection->connection_count) , 1 );
 			
-			p_ip_connection_stat->connection_count--;
+			__sync_fetch_and_sub( &(p_ip_connection_stat->connection_count) , 1 );
 			
 			if( p_ip_connection->connection_count == 0 )
 			{
 				p_ip_connection->used_flag = 0 ;
 				
-				p_ip_connection_stat->ip_count--;
+				__sync_fetch_and_sub( &(p_ip_connection_stat->ip_count) , 1 );
 			}
 			
-			pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 			return 0;
 		}
 		
@@ -916,8 +855,6 @@ int RemoveIpConnectionStat( struct ServerEnv *penv , struct IpConnectionStat *p_
 			p_ip_connection = p_ip_connection_stat->ip_connection_array ;
 		}
 	}
-	
-	pthread_mutex_unlock( & (penv->ip_connection_stat_mutex) );
 	
 	ErrorLog( __FILE__ , __LINE__ , "invalid ip_int[%u]" , ip_int );
 	

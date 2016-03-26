@@ -61,12 +61,10 @@ int OnForwardInput( struct ServerEnv *penv , struct ForwardSession *p_forward_se
 	}
 	
 	/* 登记最近读时间戳 */
-	if( STRCMP( p_forward_session->p_forward_rule->load_balance_algorithm , == , LOAD_BALANCE_ALGORITHM_RT ) )
+	if( p_forward_session->p_forward_rule->load_balance_algorithm == LOAD_BALANCE_ALGORITHM_RT )
 	{
-		pthread_mutex_lock( & (penv->server_connection_count_mutex) );
 		if( p_forward_session->type == FORWARD_SESSION_TYPE_CLIENT )
 			p_forward_session->p_forward_rule->server_addr_array[p_forward_session->server_index].rtt = g_time_tv.tv_sec ;
-		pthread_mutex_unlock( & (penv->server_connection_count_mutex) );
 	}
 	
 	/* 发送通讯数据 */
@@ -168,12 +166,10 @@ int OnForwardInput( struct ServerEnv *penv , struct ForwardSession *p_forward_se
 	}
 	
 	/* 登记最近写时间戳 */
-	if( STRCMP( p_forward_session->p_forward_rule->load_balance_algorithm , == , LOAD_BALANCE_ALGORITHM_RT ) )
+	if( p_forward_session->p_forward_rule->load_balance_algorithm == LOAD_BALANCE_ALGORITHM_RT )
 	{
-		pthread_mutex_lock( & (penv->server_connection_count_mutex) );
 		if( p_forward_session->type == FORWARD_SESSION_TYPE_CLIENT )
 			p_forward_session->p_forward_rule->server_addr_array[p_forward_session->server_index].wtt = g_time_tv.tv_sec ;
-		pthread_mutex_unlock( & (penv->server_connection_count_mutex) );
 	}
 	
 	return 0;
@@ -229,12 +225,10 @@ static int OnForwardOutput( struct ServerEnv *penv , struct ForwardSession *p_fo
 	}
 	
 	/* 登记最近写时间戳 */
-	if( STRCMP( p_forward_session->p_forward_rule->load_balance_algorithm , == , LOAD_BALANCE_ALGORITHM_RT ) )
+	if( p_forward_session->p_forward_rule->load_balance_algorithm == LOAD_BALANCE_ALGORITHM_RT )
 	{
-		pthread_mutex_lock( & (penv->server_connection_count_mutex) );
 		if( p_forward_session->type == FORWARD_SESSION_TYPE_CLIENT )
 			p_forward_session->p_forward_rule->server_addr_array[p_forward_session->server_index].wtt = g_time_tv.tv_sec ;
-		pthread_mutex_unlock( & (penv->server_connection_count_mutex) );
 	}
 	
 	return 0;
@@ -265,13 +259,16 @@ void *ForwardThread( unsigned long forward_thread_index )
 	SETTID
 	InfoLog( __FILE__ , __LINE__ , "--- G6.WorkerProcess.ForwardThread.%d ---" , forward_thread_index+1 );
 	
-	BindCpuAffinity( forward_thread_index+1 );
-	InfoLog( __FILE__ , __LINE__ , "sched_setaffinity" );
+	if( penv->cmd_para.set_cpu_affinity_flag == 1 )
+	{
+		BindCpuAffinity( forward_thread_index+1 );
+		InfoLog( __FILE__ , __LINE__ , "sched_setaffinity" );
+	}
 	
 	/* 主工作循环 */
 	while( g_exit_flag == 0 || penv->forward_session_count > 0 )
 	{
-		DebugLog( __FILE__ , __LINE__ , "epoll_wait sock[%d][...] forward_session_count[%u] ..." , penv->forward_request_pipe[forward_thread_index].fds[0] , penv->forward_session_count );
+		DebugLog( __FILE__ , __LINE__ , "epoll_wait sock[%d][...] forward_session_count[%u] ..." , penv->forward_command_pipe[forward_thread_index].fds[0] , penv->forward_session_count );
 		if( penv->cmd_para.close_log_flag == 1 )
 			CloseLogFile();
 		event_count = epoll_wait( forward_epoll_fd , events , WAIT_EVENTS_COUNT , 1000 ) ;
@@ -304,9 +301,9 @@ void *ForwardThread( unsigned long forward_thread_index )
 				
 				DebugLog( __FILE__ , __LINE__ , "pipe session event" );
 				
-				DebugLog( __FILE__ , __LINE__ , "read forward_request_pipe ..." );
-				nret = read( penv->forward_request_pipe[forward_thread_index].fds[0] , & command , 1 ) ;
-				DebugLog( __FILE__ , __LINE__ , "read forward_request_pipe done[%d][%c]" , nret , command );
+				DebugLog( __FILE__ , __LINE__ , "read forward_command_pipe ..." );
+				nret = read( penv->forward_command_pipe[forward_thread_index].fds[0] , & command , 1 ) ;
+				DebugLog( __FILE__ , __LINE__ , "read forward_command_pipe done[%d][%c]" , nret , command );
 				if( nret == -1 )
 				{
 					ErrorLog( __FILE__ , __LINE__ , "read request pipe failed , errno[%d]" , errno );
