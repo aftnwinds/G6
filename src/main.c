@@ -1,7 +1,7 @@
 #include "G6.h"
 
-char			__G6_VERSION[] = "1.0.0" ;
-char			*__G6_VERSION_1_0_0 = __G6_VERSION ;
+char			__G6_VERSION[] = "1.0.3" ;
+char			*__G6_VERSION_1_0_3 = __G6_VERSION ;
 
 struct ServerEnv	*g_penv = NULL ;
 
@@ -39,9 +39,10 @@ int main( int argc , char *argv[] )
 	/* 初始化命令行参数 */
 	memset( & (penv->cmd_para) , 0x00 , sizeof(struct CommandParameter) );
 	penv->cmd_para.config_pathfilename = NULL ;
-	penv->cmd_para.forward_thread_size = sysconf(_SC_NPROCESSORS_ONLN) - 2 ;
-	if( penv->cmd_para.forward_thread_size < 1 )
+	if( sysconf(_SC_NPROCESSORS_ONLN) - 2 < 1 )
 		penv->cmd_para.forward_thread_size = 1 ;
+	else
+		penv->cmd_para.forward_thread_size = sysconf(_SC_NPROCESSORS_ONLN) - 2 ;
 	penv->cmd_para.forward_session_size = DEFAULT_FORWARD_SESSIONS_MAXCOUNT ;
 	penv->cmd_para.log_level = LOGLEVEL_INFO ;
 	snprintf( penv->cmd_para.log_pathfilename , sizeof(penv->cmd_para.log_pathfilename)-1 , "%s/log/G6.log" , getenv("HOME") );
